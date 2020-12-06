@@ -21,7 +21,7 @@
     "InstanceType": {
       "Description": "WebServer EC2 instance type",
       "Type": "String",
-      "Default": "t2.small",
+      "Default": "t2.micro",
       "AllowedValues": [ "t1.micro", "t2.nano", "t2.micro", "t2.small", "t2.medium", "t2.large", "m1.small", "m1.medium", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge", "m4.large", "m4.xlarge", "m4.2xlarge", "m4.4xlarge", "m4.10xlarge", "c1.medium", "c1.xlarge", "c3.large", "c3.xlarge", "c3.2xlarge", "c3.4xlarge", "c3.8xlarge", "c4.large", "c4.xlarge", "c4.2xlarge", "c4.4xlarge", "c4.8xlarge", "g2.2xlarge", "g2.8xlarge", "r3.large", "r3.xlarge", "r3.2xlarge", "r3.4xlarge", "r3.8xlarge", "i2.xlarge", "i2.2xlarge", "i2.4xlarge", "i2.8xlarge", "d2.xlarge", "d2.2xlarge", "d2.4xlarge", "d2.8xlarge", "hi1.4xlarge", "hs1.8xlarge", "cr1.8xlarge", "cc2.8xlarge", "cg1.4xlarge"]
 ,
       "ConstraintDescription": "must be a valid EC2 instance type."
@@ -57,7 +57,7 @@
       "Type": "String",
       "MinLength": "9",
       "MaxLength": "18",
-      "Default": "192.168.1.67",
+      "Default": "192.168.1.67/32",
       "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
       "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
     }
@@ -261,12 +261,6 @@
         "Comment" : "Install a simple application",
         "AWS::CloudFormation::Init" : {
           "config" : {
-            "packages" : {
-              "yum" : {
-                "httpd" : []
-              }
-            },
-
             "files" : {
               "/etc/cfn/cfn-hup.conf" : {
                 "content" : { "Fn::Join" : ["", [
@@ -323,6 +317,8 @@
              "ln -s /opt/nodejs/bin/npm /usr/bin/npm\n",
              "wget https://raw.githubusercontent.com/GoogleCloudPlatform/nodejs-getting-started/master/gce/app.js\n",
              "wget https://raw.githubusercontent.com/GoogleCloudPlatform/nodejs-getting-started/master/gce/package.json\n",
+             "npm install\n",
+             "npm start\n",
              "/opt/aws/bin/cfn-init -v ",
              "         --stack ", { "Ref" : "AWS::StackName" },
              "         --resource LaunchConfig ",
@@ -332,8 +328,6 @@
              "         --stack ", { "Ref" : "AWS::StackName" },
              "         --resource WebServerGroup ",
              "         --region ", { "Ref" : "AWS::Region" }, "\n",
-             "npm install\n",
-             "npm start"
         ]]}}
       }
     },
@@ -362,6 +356,7 @@
       "Type" : "AWS::ElasticLoadBalancingV2::TargetGroup",
       "Properties" : {
         "HealthCheckIntervalSeconds" : 30,
+        "HealthCheckPath" : "/",
         "HealthCheckTimeoutSeconds" : 5,
         "HealthyThresholdCount" : 3,
         "Port" : 80,
@@ -377,7 +372,7 @@
         "GroupDescription": "Enable SSH access and HTTP access on the configured port",
         "SecurityGroupIngress": [
           { "IpProtocol": "tcp", "FromPort": "22", "ToPort": "22", "CidrIp": { "Ref" : "SSHLocation" } },
-          { "IpProtocol": "tcp", "FromPort": "80", "ToPort": "80", "SourceSecurityGroupId" : {"Fn::Select" : [0, {"Fn::GetAtt" : ["ApplicationLoadBalancer", "SecurityGroups"]}]}},
+          { "IpProtocol": "tcp", "FromPort": "80", "ToPort": "8080", "SourceSecurityGroupId" : {"Fn::Select" : [0, {"Fn::GetAtt" : ["ApplicationLoadBalancer", "SecurityGroups"]}]}},
           { "IpProtocol": "tcp", "FromPort": "3389", "ToPort": "3389", "CidrIp": { "Ref" : "TCPUDPLocation" } },
           { "IpProtocol": "tcp", "FromPort": "8080", "ToPort": "8080", "CidrIp": { "Ref" : "PrivateAccessIP" } }
         ],
