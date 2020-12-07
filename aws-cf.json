@@ -357,51 +357,23 @@
               "mode"    : "000400",
               "owner"   : "root",
               "group"   : "root"
-            }
-          }
-        },
-          "config" : {
-            "packages" : {
-              "yum" : {
-                "awslogs" : []
-              }
             },
-            "files" : {
-              "/etc/cfn/cfn-hup.conf" : {
-                "content" : { "Fn::Join" : ["", [
-                  "[main]\n",
-                  "stack=", { "Ref" : "AWS::StackId" }, "\n",
-                  "region=", { "Ref" : "AWS::Region" }, "\n"
-                ]]},
-                "mode"    : "000400",
-                "owner"   : "root",
-                "group"   : "root"
-              },
-              "/etc/cfn/hooks.d/cfn-auto-reloader.conf" : {
-                "content": { "Fn::Join" : ["", [
-                  "[cfn-auto-reloader-hook]\n",
-                  "triggers=post.update\n",
-                  "path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init\n",
-                  "action=/opt/aws/bin/cfn-init -v ",
-                  "         --stack ", { "Ref" : "AWS::StackName" },
-                  "         --resource LaunchConfig ",
-                  "         --region ", { "Ref" : "AWS::Region" }, "\n",
-                  "runas=root\n"
-                ]]},
-		"mode"    : "000400",
-                "owner"   : "root",
-                "group"   : "root"
-              }
-            },
-
-            "services" : {
-              "sysvinit" : {
-                "cfn-hup" : {
-                  "enabled" : "true", "ensureRunning" : "true",
-                  "files" : ["/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf"]
-                }
-              },
+            "/lib/systemd/system/cfn-hup.service" : {
+              "content" : { "Fn::Join" : ["", [
+                "[Unit]\n",
+                "Description=cfn-hup daemon", "\n",
+                "[Service]\n",
+                "Type=simple", "\n",
+                "ExecStart=/opt/aws/bin/cfn-hup", "\n",
+                "Restart=always", "\n",
+                "[Install]\n",
+                "WantedBy=multi-user.target"
+              ]]}
             }
+          },
+          "commands" : {
+            "01enable_cfn_hup" : {"command" : "systemctl enable cfn-hup.service"  },
+            "02start_cfn_hup:" : {"command" : "systemctl start cfn-hup.service"  }
           }
         }
       },
@@ -429,7 +401,8 @@
              "/opt/aws/bin/cfn-init -v ",
              "         --stack ", { "Ref" : "AWS::StackName" },
              "         --resource LaunchConfig ",
-             "         --region ", { "Ref" : "AWS::Region" }, "\n",
+             "         --region ", { "Ref" : "AWS::Region" },
+             "         --configsets default", "\n",
 
              "/opt/aws/bin/cfn-signal -e $? ",
              "         --stack ", { "Ref" : "AWS::StackName" },
