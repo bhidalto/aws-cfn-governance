@@ -64,30 +64,6 @@
   },
 
   "Mappings": {
-    "Region2Examples" : {
-      "ap-east-1"      : { "Examples" : "https://s3-ap-east-1.amazonaws.com/cloudformation-examples-ap-east-1" },
-      "ap-northeast-1" : { "Examples" : "https://s3-ap-northeast-1.amazonaws.com/cloudformation-examples-ap-northeast-1" },
-      "ap-northeast-2" : { "Examples" : "https://s3-ap-northeast-2.amazonaws.com/cloudformation-examples-ap-northeast-2" },
-      "ap-northeast-3" : { "Examples" : "https://s3-ap-northeast-3.amazonaws.com/cloudformation-examples-ap-northeast-3" },
-      "ap-south-1"     : { "Examples" : "https://s3-ap-south-1.amazonaws.com/cloudformation-examples-ap-south-1" },
-      "ap-southeast-1" : { "Examples" : "https://s3-ap-southeast-1.amazonaws.com/cloudformation-examples-ap-southeast-1" },
-      "ap-southeast-2" : { "Examples" : "https://s3-ap-southeast-2.amazonaws.com/cloudformation-examples-ap-southeast-2" },
-      "ca-central-1"   : { "Examples" : "https://s3-ca-central-1.amazonaws.com/cloudformation-examples-ca-central-1" },
-      "cn-north-1"     : { "Examples" : "https://s3.cn-north-1.amazonaws.com.cn/cloudformation-examples-cn-north-1" },
-      "cn-northwest-1" : { "Examples" : "https://s3.cn-northwest-1.amazonaws.com.cn/cloudformation-examples-cn-northwest-1" },
-      "eu-central-1"   : { "Examples" : "https://s3-eu-central-1.amazonaws.com/cloudformation-examples-eu-central-1" },
-      "eu-north-1"     : { "Examples" : "https://s3-eu-north-1.amazonaws.com/cloudformation-examples-eu-north-1" },
-      "eu-west-1"      : { "Examples" : "https://s3-eu-west-1.amazonaws.com/cloudformation-examples-eu-west-1" },
-      "eu-west-2"      : { "Examples" : "https://s3-eu-west-2.amazonaws.com/cloudformation-examples-eu-west-2" },
-      "eu-west-3"      : { "Examples" : "https://s3-eu-west-3.amazonaws.com/cloudformation-examples-eu-west-3" },
-      "me-south-1"     : { "Examples" : "https://s3-me-south-1.amazonaws.com/cloudformation-examples-me-south-1" },
-      "sa-east-1"      : { "Examples" : "https://s3-sa-east-1.amazonaws.com/cloudformation-examples-sa-east-1" },
-      "us-east-1"      : { "Examples" : "https://s3.amazonaws.com/cloudformation-examples-us-east-1" },
-      "us-east-2"      : { "Examples" : "https://s3-us-east-2.amazonaws.com/cloudformation-examples-us-east-2" },
-      "us-west-1"      : { "Examples" : "https://s3-us-west-1.amazonaws.com/cloudformation-examples-us-west-1" },
-      "us-west-2"      : { "Examples" : "https://s3-us-west-2.amazonaws.com/cloudformation-examples-us-west-2" }
-    }
-,
     "AWSInstanceType2Arch" : {
       "t1.micro"    : { "Arch" : "HVM64"  },
       "t2.nano"     : { "Arch" : "HVM64"  },
@@ -234,7 +210,7 @@
       "CreationPolicy" : {
         "ResourceSignal" : {
           "Timeout" : "PT15M",
-          "Count"   : "2"
+          "Count"   : "1"
         }
       },
       "UpdatePolicy" : {
@@ -272,7 +248,6 @@
                 "owner"   : "root",
                 "group"   : "root"
               },
-
               "/etc/cfn/hooks.d/cfn-auto-reloader.conf" : {
                 "content": { "Fn::Join" : ["", [
                   "[cfn-auto-reloader-hook]\n",
@@ -292,7 +267,6 @@
 
             "services" : {
               "sysvinit" : {
-                "httpd"    : { "enabled" : "true", "ensureRunning" : "true" },
                 "cfn-hup" : { "enabled" : "true", "ensureRunning" : "true",
                               "files" : ["/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf"]}
               }
@@ -318,7 +292,7 @@
              "wget https://raw.githubusercontent.com/GoogleCloudPlatform/nodejs-getting-started/master/gce/app.js\n",
              "wget https://raw.githubusercontent.com/GoogleCloudPlatform/nodejs-getting-started/master/gce/package.json\n",
              "npm install\n",
-             "npm start\n",
+             "npm start &\n",
              "/opt/aws/bin/cfn-init -v ",
              "         --stack ", { "Ref" : "AWS::StackName" },
              "         --resource LaunchConfig ",
@@ -327,7 +301,7 @@
              "/opt/aws/bin/cfn-signal -e $? ",
              "         --stack ", { "Ref" : "AWS::StackName" },
              "         --resource WebServerGroup ",
-             "         --region ", { "Ref" : "AWS::Region" }, "\n",
+             "         --region ", { "Ref" : "AWS::Region" }, "\n"
         ]]}}
       }
     },
@@ -359,7 +333,7 @@
         "HealthCheckPath" : "/",
         "HealthCheckTimeoutSeconds" : 5,
         "HealthyThresholdCount" : 3,
-        "Port" : 80,
+        "Port" : 8080,
         "Protocol" : "HTTP",
         "UnhealthyThresholdCount" : 5,
         "VpcId" : {"Ref" : "VpcId"}
@@ -372,7 +346,7 @@
         "GroupDescription": "Enable SSH access and HTTP access on the configured port",
         "SecurityGroupIngress": [
           { "IpProtocol": "tcp", "FromPort": "22", "ToPort": "22", "CidrIp": { "Ref" : "SSHLocation" } },
-          { "IpProtocol": "tcp", "FromPort": "80", "ToPort": "8080", "SourceSecurityGroupId" : {"Fn::Select" : [0, {"Fn::GetAtt" : ["ApplicationLoadBalancer", "SecurityGroups"]}]}},
+          {"IpProtocol" : "tcp","FromPort" : "80","ToPort" : "8080","SourceSecurityGroupId" : {"Fn::Select" : [0, {"Fn::GetAtt" : ["ApplicationLoadBalancer", "SecurityGroups"]}]}},
           { "IpProtocol": "tcp", "FromPort": "3389", "ToPort": "3389", "CidrIp": { "Ref" : "TCPUDPLocation" } },
           { "IpProtocol": "tcp", "FromPort": "8080", "ToPort": "8080", "CidrIp": { "Ref" : "PrivateAccessIP" } }
         ],
