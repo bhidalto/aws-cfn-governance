@@ -309,7 +309,8 @@
     "ApplicationLoadBalancer" : {
       "Type" : "AWS::ElasticLoadBalancingV2::LoadBalancer",
       "Properties" : {
-        "Subnets" : { "Ref" : "Subnets"}
+        "Subnets" : { "Ref" : "Subnets"},
+        "SecurityGroups" : [{ "Ref" : "ELBSecurityGroup" }]
       }
     },
 
@@ -343,12 +344,22 @@
     "InstanceSecurityGroup": {
       "Type": "AWS::EC2::SecurityGroup",
       "Properties": {
-        "GroupDescription": "Enable SSH access and HTTP access on the configured port",
+        "GroupDescription": "Enable SSH access and HTTP access on the configured port.",
         "SecurityGroupIngress": [
           { "IpProtocol": "tcp", "FromPort": "22", "ToPort": "22", "CidrIp": { "Ref" : "SSHLocation" } },
           {"IpProtocol" : "tcp","FromPort" : "80","ToPort" : "8080","SourceSecurityGroupId" : {"Fn::Select" : [0, {"Fn::GetAtt" : ["ApplicationLoadBalancer", "SecurityGroups"]}]}},
           { "IpProtocol": "tcp", "FromPort": "3389", "ToPort": "3389", "CidrIp": { "Ref" : "TCPUDPLocation" } },
           { "IpProtocol": "tcp", "FromPort": "8080", "ToPort": "8080", "CidrIp": { "Ref" : "PrivateAccessIP" } }
+        ],
+        "VpcId" : { "Ref" : "VpcId" }
+      }
+    },
+    "ELBSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Enable application access on the Load Balancer at port 80.",
+        "SecurityGroupIngress": [
+          { "IpProtocol": "tcp", "FromPort": "80", "ToPort": "80", "CidrIp": "0.0.0.0/0" }
         ],
         "VpcId" : { "Ref" : "VpcId" }
       }
