@@ -35,7 +35,7 @@
     },
 
     "SSHLocation" : {
-      "Description" : "The IP address range that can be used to SSH to the EC2 instances, using port 22,",
+      "Description" : "The IP address range that can be used to SSH to the EC2 instances, using port 22.",
       "Type": "String",
       "MinLength": "9",
       "MaxLength": "18",
@@ -216,7 +216,7 @@
       "UpdatePolicy" : {
         "AutoScalingRollingUpdate" : {
           "MaxBatchSize" : "1",
-          "MinInstancesInService" : "1",
+          "MinInstancesInService" : "2",
           "PauseTime" : "PT15M",
           "WaitOnResourceSignals": "true"
         }
@@ -224,9 +224,9 @@
       "Properties": {
         "VPCZoneIdentifier" : { "Ref" : "Subnets" },
         "LaunchConfigurationName": { "Ref": "LaunchConfig" },
-        "MinSize": "0",
+        "MinSize": "2",
         "MaxSize": "6",
-        "DesiredCapacity" : "1",
+        "DesiredCapacity" : "2",
         "TargetGroupARNs": [ { "Ref": "ALBTargetGroup" } ]
       }
     },
@@ -368,7 +368,7 @@
 
   "Outputs": {
     "URL": {
-      "Description": "URL of the website",
+      "Description": "Load Balancer URL from which the application is publicly accesible.",
       "Value": { "Fn::Join": [ "", [ "http://", { "Fn::GetAtt": [ "ApplicationLoadBalancer", "DNSName" ] } ] ] }
     }
   }
