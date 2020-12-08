@@ -20,11 +20,12 @@ The above setup, is going to be created with a CloudFormation stack which will b
 
 - CloudFormation
 - AutoScaling Group
-- Elastic Cloud Computing(EC2)
+- Elastic Computing Cloud(EC2)
 - Elastic Load Balancer(ELB)
-- Simple Storage Service(S3)
+- EventBridge
 - CloudWatch
 - Lambda
+- Systems Manager Agent(SSM)
 
 ## Parameters
 

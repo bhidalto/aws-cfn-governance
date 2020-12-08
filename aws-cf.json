@@ -205,59 +205,51 @@
   },
 
   "Resources": {
-    "LogRole": {
+    "IAMPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect" : "Allow",
+            "Resource" : "*",
+            "Action" : ["autoscaling:CompleteLifecycleAction"]
+            }]
+          }
+        }
+    },
+    "LambdaRole" : {
       "Type": "AWS::IAM::Role",
       "Properties": {
+        "ManagedPolicyArns" : ["arn:aws:iam::aws:policy/AmazonSSMFullAccess", "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole", { "Ref" : "IAMPolicy"}],
         "AssumeRolePolicyDocument": {
           "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Effect": "Allow",
-              "Principal": {
-                "Service": [
-                  "ec2.amazonaws.com"
-                ]
-              },
-              "Action": [
-                "sts:AssumeRole"
-              ]
-            }
-          ]
-        },
-        "Path": "/",
-        "Policies": [
-          {
-            "PolicyName": "LogRolePolicy",
-            "PolicyDocument": {
-              "Version": "2012-10-17",
-              "Statement": [
-                {
-                  "Effect": "Allow",
-                  "Action": [
-                    "logs:Create*",
-                    "logs:PutLogEvents",
-                    "s3:GetObject"
-                  ],
-                  "Resource": [
-                    "arn:aws:logs:*:*:*",
-                    "arn:aws:s3:::*"
-                  ]
-                }
-              ]
-            }
-          }
-        ]
+          "Statement" : [{
+            "Effect" : "Allow",
+            "Principal" : { "Service" : ["lambda.amazonaws.com"]},
+            "Action" : "sts:AssumeRole"
+            }]
+        }
       }
     },
-    "LogRoleInstanceProfile": {
+    "InstanceRole" : {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "ManagedPolicyArns" : ["arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM", { "Ref" : "IAMPolicy"}],
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement" : [{
+            "Effect" : "Allow",
+            "Principal" : { "Service" : ["ec2.amazonaws.com"]},
+            "Action" : "sts:AssumeRole"
+            }]
+        }
+      }
+    },
+    "IamInstanceProfile": {
       "Type": "AWS::IAM::InstanceProfile",
       "Properties": {
-        "Path": "/",
-        "Roles": [
-          {
-            "Ref": "LogRole"
-          }
-        ]
+        "Roles" : [{ "Ref" : "InstanceRole"}]
       }
     },
     "WebServerGroup": {
@@ -282,98 +274,142 @@
         "MinSize": "2",
         "MaxSize": "6",
         "DesiredCapacity" : "2",
+        "MetricsCollection": [{"Granularity":"1Minute"}],
         "TargetGroupARNs": [ { "Ref": "ALBTargetGroup" } ]
       }
     },
+    "InstanceShutdown" : {
+      "Type" : "AWS::AutoScaling::LifecycleHook",
+      "Properties" : {
+        "AutoScalingGroupName" : { "Ref" : "WebServerGroup"},
+        "LifecycleTransition" : "autoscaling:EC2_INSTANCE_TERMINATING"
+      }
+    },
 
+    "Bucket" : {
+      "Type" : "AWS::S3::Bucket",
+      "Properties" : {
+        "AccessControl" : "Private",
+        "VersioningConfiguration" : { "Status" : "Suspended"}
+      }
+    },
+    "Document" : {
+      "Type" : "AWS::SSM::Document",
+      "Properties" : {
+        "Content" : {
+          "schemaVersion": "1.2",
+          "description": "Backup logs to S3",
+          "parameters": {},
+          "runtimeConfig": {
+            "aws:runShellScript": {
+              "properties": { "Fn::Join" : ["", [
+                "[main]\n",
+                "stack=", { "Ref" : "AWS::StackId" }, "\n",
+                "region=", { "Ref" : "AWS::Region" }, "\n"
+              ]]},
+              "runCommand": { "Fn::Join" : ["", [
+                "\n",
+                "ASGNAME=",{ "Ref" : "WebServerGroup" }, "\n",
+                "LIFECYCLEHOOKNAME=",{ "Ref" : "InstanceShutdown" }, "\n",
+                "BACKUPDIRECTORY='/var/log'\n",
+                "S3BUCKET=",{ "Ref" : "Bucket" }, "\n",
+                "INSTANCEID=$(curl http://169.254.169.254/latest/meta-data/instance-id)\n",
+                "REGION=$(curl http://169.254.169.254/latest/meta-data/placement/availability-zone)\n",
+                "REGION=${!REGION::-1}\n",
+                "HOOKRESULT='CONTINUE'\n",
+                "MESSAGE=''\n",
+                "\n",
+                "tar -cf /tmp/${!INSTANCEID}.tar $BACKUPDIRECTORY &> /tmp/backup\n",
+                "if [ $? -ne 0 ]\n",
+                "then\n",
+                "   MESSAGE=$(cat /tmp/backup)\n",
+                "else\n",
+                "   aws s3 cp /tmp/${!INSTANCEID}.tar s3://${!S3BUCKET}/${!INSTANCEID}/ &> /tmp/backup\n",
+                "       MESSAGE=$(cat /tmp/backup)\n",
+                "fi\n",
+                "\n",
+                "aws autoscaling complete-lifecycle-action --lifecycle-hook-name ${!LIFECYCLEHOOKNAME} --auto-scaling-group-name ${!ASGNAME} --lifecycle-action-result ${!HOOKRESULT} --instance-id ${!INSTANCEID}  --region ${!REGION}"
+              ]]}
+            }
+          }
+        }
+      }
+    },
+    "LambdaFunction" : {
+      "Type" : "AWS::Lambda::Function",
+      "Properties" : {
+        "Code" : "lambda_backup.py",
+        "Handler" : "lambda_backup.lambda_handler",
+        "Role" : { "Fn::GetAtt" : [ "LambdaRole", "Arn" ] },
+        "Runtime" : "python2.7",
+        "Environment" : { "Variables" : {
+          "DOCUMENT_NAME" : { "Ref" : "Document"}
+          }}
+      }
+    },
+    "LambdaPermissions" : {
+      "Type" : "AWS::Lambda::Function",
+      "Properties" : {
+        "Action" : "lambda:InvokeFunction",
+        "FunctionName" : { "Fn::GetAtt" : [ "LambdaFunction", "Arn" ] },
+        "Principal" : "events.amazonaws.com"
+      }
+    },
+    "EventsRule" : {
+      "Type" : "AWS::Events::Rule",
+      "Properties" : {
+        "EventPattern" : {
+          "source" : ["aws.autoscaling"],
+          "detail" : {
+            "LifecycleTransition": ["autoscaling:EC2_INSTANCE_TERMINATING"]
+          }
+        },
+        "Targets" : [{
+          "Arn" : { "Fn::GetAtt" : [ "LambdaFunction", "Arn" ] },
+          "Id" : "target"
+          }]
+      }
+    },
     "LaunchConfig": {
       "Type": "AWS::AutoScaling::LaunchConfiguration",
       "Metadata" : {
         "Comment" : "Install a simple application",
         "AWS::CloudFormation::Init" : {
-          "configSets" : {
-            "default" : [ "01_setupCfnHup" , "02_config-amazon-cloudwatch-agent", "03_restart_amazon-cloudwatch-agent" ],
-            "UpdateEnvironment" : [ "02_config-amazon-cloudwatch-agent" , "03_restart_amazon-cloudwatch-agent" ]
-          },
-          "02_config-amazon-cloudwatch-agent" : {
+          "config" : {
             "files" : {
-              "/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json" : {
-                "content" : { "Fn::Sub": '{
-                  "metrics": {
-                    "append_dimensions": {
-                      "AutoScalingGroupName": "${!aws:AutoScalingGroupName}",
-                      "ImageId": "${!aws:ImageId}",
-                      "InstanceId": "${!aws:InstanceId}",
-                      "InstanceType": "${!aws:InstanceType}"
-                    },
-                    "metrics_collected": {
-                      "mem": {
-                        "measurement": [
-                          "mem_used_percent"
-                        ]
-                      },
-                      "swap": {
-                        "measurement": [
-                          "swap_used_percent"
-                        ]
-                      }
-                    }
-                  }
-                }'
+              "/etc/cfn/cfn-hup.conf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "[main]\n",
+                  "stack=", { "Ref" : "AWS::StackId" }, "\n",
+                  "region=", { "Ref" : "AWS::Region" }, "\n"
+                ]]},
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root"
               },
-            }
-          }
-        },
-        "03_restart_amazon-cloudwatch-agent" : {
-          "commands" : {
-            "01_stop_service" : {"command" : "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a stop"  },
-            "02_start_service:" : {"command" : "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s"  }
-          }
-        },
-        "01_setupCfnHup" : {
-          "files" : {
-            "/etc/cfn/cfn-hup.conf" : {
-              "content" : { "Fn::Join" : ["", [
-                "[main]\n",
-                "stack=", { "Ref" : "AWS::StackId" }, "\n",
-                "region=", { "Ref" : "AWS::Region" }, "\n"
-              ]]},
-              "mode"    : "000400",
-              "owner"   : "root",
-              "group"   : "root"
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf" : {
+                "content": { "Fn::Join" : ["", [
+                  "[cfn-auto-reloader-hook]\n",
+                  "triggers=post.update\n",
+                  "path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init\n",
+                  "action=/opt/aws/bin/cfn-init -v ",
+                  "         --stack ", { "Ref" : "AWS::StackName" },
+                  "         --resource LaunchConfig ",
+                  "         --region ", { "Ref" : "AWS::Region" }, "\n",
+                  "runas=root\n"
+                ]]},
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root"
+              }
             },
-            "/etc/cfn/hooks.d/cfn-auto-reloader.conf" : {
-              "content": { "Fn::Join" : ["", [
-                "[cfn-auto-reloader-hook]\n",
-                "triggers=post.update\n",
-                "path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init\n",
-                "action=/opt/aws/bin/cfn-init -v ",
-                "         --stack ", { "Ref" : "AWS::StackName" },
-                "         --resource LaunchConfig ",
-                "         --region ", { "Ref" : "AWS::Region" },
-                "         --configSets UpdateEnvironment " }, "\n",
-                "runas=root\n"
-              ]]},
-              "mode"    : "000400",
-              "owner"   : "root",
-              "group"   : "root"
-            },
-            "/lib/systemd/system/cfn-hup.service" : {
-              "content" : { "Fn::Join" : ["", [
-                "[Unit]\n",
-                "Description=cfn-hup daemon", "\n",
-                "[Service]\n",
-                "Type=simple", "\n",
-                "ExecStart=/opt/aws/bin/cfn-hup", "\n",
-                "Restart=always", "\n",
-                "[Install]\n",
-                "WantedBy=multi-user.target"
-              ]]}
+
+            "services" : {
+              "sysvinit" : {
+                "cfn-hup" : { "enabled" : "true", "ensureRunning" : "true",
+                              "files" : ["/etc/cfn/cfn-hup.conf", "/etc/cfn/hooks.d/cfn-auto-reloader.conf"]}
+              }
             }
-          },
-          "commands" : {
-            "01enable_cfn_hup" : {"command" : "systemctl enable cfn-hup.service"  },
-            "02start_cfn_hup:" : {"command" : "systemctl start cfn-hup.service"  }
           }
         }
       },
@@ -384,12 +420,14 @@
             { "Fn::FindInMap": [ "AWSInstanceType2Arch", { "Ref": "InstanceType" }, "Arch" ] } ]
         },
         "SecurityGroups": [ { "Ref": "InstanceSecurityGroup" } ],
-        "IamInstanceProfile": { "Ref": "LogRoleInstanceProfile" },
+        "IamInstanceProfile": { "Ref": "IamInstanceProfile" },
+        "InstanceMonitoring" : "false",
         "InstanceType": { "Ref": "InstanceType" },
         "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
              "#!/bin/bash -xe\n",
              "yum update -y aws-cfn-bootstrap\n",
-             "rpm -Uvh https://s3.amazonaws.com/amazoncloudwatch-agent/amazon_linux/amd64/latest/amazon-cloudwatch-agent.rpm\n",
+             "sudo yum install amazon-ssm-agent -y\n",
+             "sudo /sbin/start amazon-ssm-agent &\n",
              "mkdir /opt/nodejs\n",
              "curl https://nodejs.org/dist/v8.12.0/node-v8.12.0-linux-x64.tar.gz | tar xvzf - -C /opt/nodejs --strip-components=1\n",
              "ln -s /opt/nodejs/bin/node /usr/bin/node\n",
@@ -401,8 +439,7 @@
              "/opt/aws/bin/cfn-init -v ",
              "         --stack ", { "Ref" : "AWS::StackName" },
              "         --resource LaunchConfig ",
-             "         --region ", { "Ref" : "AWS::Region" },
-             "         --configsets default", "\n",
+             "         --region ", { "Ref" : "AWS::Region" }, "\n",
 
              "/opt/aws/bin/cfn-signal -e $? ",
              "         --stack ", { "Ref" : "AWS::StackName" },
@@ -410,7 +447,7 @@
              "         --region ", { "Ref" : "AWS::Region" }, "\n"
         ]]}}
       }
-    },
+  },
 
     "ApplicationLoadBalancer" : {
       "Type" : "AWS::ElasticLoadBalancingV2::LoadBalancer",
