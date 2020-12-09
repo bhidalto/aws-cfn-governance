@@ -218,10 +218,32 @@
           }
         }
     },
+    "BucketsPolicy" : {
+      "Type" : "AWS::IAM::Policy",
+      "Properties" : {
+        "PolicyName" : "S3BucketsPolicy",
+        "PolicyDocument" : {
+          "Statement" : [
+            {
+              "Effect" : "Allow",
+              "Action" : [
+                "s3:PutObject",
+                "s3:PutObjectAcl",
+                "s3:GetObject",
+                "s3:GetObjectAcl",
+                "s3:DeleteObject"
+              ],
+              "Resource" : "*"
+            }
+          ]
+        },
+        "Roles" : [{ "Ref" : "InstanceRole"}]
+      }
+    },
     "LambdaRole" : {
       "Type": "AWS::IAM::Role",
       "Properties": {
-        "ManagedPolicyArns" : ["arn:aws:iam::aws:policy/AmazonSSMFullAccess", "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole", { "Ref" : "IAMPolicy"}],
+        "ManagedPolicyArns" : ["arn:aws:iam::aws:policy/AmazonSSMFullAccess", "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"],
         "AssumeRolePolicyDocument": {
           "Version": "2012-10-17",
           "Statement" : [{
@@ -235,7 +257,7 @@
     "InstanceRole" : {
       "Type": "AWS::IAM::Role",
       "Properties": {
-        "ManagedPolicyArns" : ["arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM", { "Ref" : "IAMPolicy"}],
+        "ManagedPolicyArns" : ["arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore", { "Ref" : "IAMPolicy"}],
         "AssumeRolePolicyDocument": {
           "Version": "2012-10-17",
           "Statement" : [{
@@ -271,9 +293,9 @@
       "Properties": {
         "VPCZoneIdentifier" : { "Ref" : "Subnets" },
         "LaunchConfigurationName": { "Ref": "LaunchConfig" },
-        "MinSize": "2",
+        "MinSize": "4",
         "MaxSize": "6",
-        "DesiredCapacity" : "2",
+        "DesiredCapacity" : "4",
         "MetricsCollection": [{"Granularity":"1Minute"}],
         "TargetGroupARNs": [ { "Ref": "ALBTargetGroup" } ]
       }
@@ -302,34 +324,11 @@
           "parameters": {},
           "runtimeConfig": {
             "aws:runShellScript": {
-              "properties": { "Fn::Join" : ["", [
-                "[main]\n",
-                "stack=", { "Ref" : "AWS::StackId" }, "\n",
-                "region=", { "Ref" : "AWS::Region" }, "\n"
-              ]]},
-              "runCommand": { "Fn::Join" : ["", [
-                "\n",
-                "ASGNAME=",{ "Ref" : "WebServerGroup" }, "\n",
-                "LIFECYCLEHOOKNAME=",{ "Ref" : "InstanceShutdown" }, "\n",
-                "BACKUPDIRECTORY='/var/log'\n",
-                "S3BUCKET=",{ "Ref" : "Bucket" }, "\n",
-                "INSTANCEID=$(curl http://169.254.169.254/latest/meta-data/instance-id)\n",
-                "REGION=$(curl http://169.254.169.254/latest/meta-data/placement/availability-zone)\n",
-                "REGION=${!REGION::-1}\n",
-                "HOOKRESULT='CONTINUE'\n",
-                "MESSAGE=''\n",
-                "\n",
-                "tar -cf /tmp/${!INSTANCEID}.tar $BACKUPDIRECTORY &> /tmp/backup\n",
-                "if [ $? -ne 0 ]\n",
-                "then\n",
-                "   MESSAGE=$(cat /tmp/backup)\n",
-                "else\n",
-                "   aws s3 cp /tmp/${!INSTANCEID}.tar s3://${!S3BUCKET}/${!INSTANCEID}/ &> /tmp/backup\n",
-                "       MESSAGE=$(cat /tmp/backup)\n",
-                "fi\n",
-                "\n",
-                "aws autoscaling complete-lifecycle-action --lifecycle-hook-name ${!LIFECYCLEHOOKNAME} --auto-scaling-group-name ${!ASGNAME} --lifecycle-action-result ${!HOOKRESULT} --instance-id ${!INSTANCEID}  --region ${!REGION}"
-              ]]}
+              "properties": [{
+                "id": "0.aws:runShellScript",
+                "runCommand":
+                { "Fn::Split" : [ "\n", { "Fn::Sub" : "ASGNAME='${WebServerGroup}'\nLIFECYCLEHOOKNAME='${InstanceShutdown}'\nBACKUPDIRECTORY='/var/log'\nS3BUCKET='${Bucket}'\nINSTANCEID=$(curl http://169.254.169.254/latest/meta-data/instance-id)\nREGION=$(curl http://169.254.169.254/latest/meta-data/placement/availability-zone)\nREGION=${!REGION::-1}\nHOOKRESULT='CONTINUE'\ntar -czvf /tmp/${!INSTANCEID}.tar $BACKUPDIRECTORY\naws s3 cp /tmp/${!INSTANCEID}.tar s3://${!S3BUCKET}/${!INSTANCEID}/\naws autoscaling complete-lifecycle-action --lifecycle-hook-name ${!LIFECYCLEHOOKNAME} --auto-scaling-group-name ${!ASGNAME} --lifecycle-action-result ${!HOOKRESULT} --instance-id ${!INSTANCEID}  --region ${!REGION}" } ] }
+              }]
             }
           }
         }
@@ -339,141 +338,141 @@
       "Type" : "AWS::Lambda::Function",
       "Properties" : {
         "Code" : {
-          "ZipFile": "import boto3
-          import json
-          import logging
-          import time
-
-          logger = logging.getLogger()
-          logger.setLevel(logging.DEBUG)
-          ssm_client = boto3.client(\"ssm\")
-
-          LIFECYCLE_KEY = \"LifecycleHookName\"
-          ASG_KEY = \"AutoScalingGroupName\"
-          EC2_KEY = \"EC2InstanceId\"
-          DOCUMENT_NAME = \"ASGLogBackup\"
-          RESPONSE_DOCUMENT_KEY = \"DocumentIdentifiers\"
-
-          def check_response(response_json):
-              try:
-                  if response_json['ResponseMetadata']['HTTPStatusCode'] == 200:
-                      return True
-                  else:
-                      return False
-              except KeyError:
-                  return False
-
-          def list_document():
-              document_filter_parameters = {'key': 'Name', 'value': DOCUMENT_NAME}
-              response = ssm_client.list_documents(
-                  DocumentFilterList=[ document_filter_parameters ]
-              )
-              return response
-
-          def check_document():
-              # If the document already exists, it will not create it.
-              try:
-                  response = list_document()
-                  if check_response(response):
-                      logger.info(\"Documents list: %s\", response)
-                      if response[RESPONSE_DOCUMENT_KEY]:
-                          logger.info(\"Documents exists: %s\", response)
-                          return True
-                      else:
-                          return False
-                  else:
-                      logger.error(\"Documents' list error: %s\", response)
-                      return False
-              except Exception, e:
-                  logger.error(\"Document error: %s\", str(e))
-                  return None
-
-          def send_command(instance_id):
-              # Until the document is not ready, waits in accordance to a backoff mechanism.
-              while True:
-                  timewait = 1
-                  response = list_document()
-                  if any(response[RESPONSE_DOCUMENT_KEY]):
-                      break
-                  time.sleep(timewait)
-                  timewait += timewait
-              try:
-                  response = ssm_client.send_command(
-                      InstanceIds = [ instance_id ],
-                      DocumentName = DOCUMENT_NAME,
-                      TimeoutSeconds = 120
-                      )
-                  if check_response(response):
-                      logger.info(\"Command sent: %s\", response)
-                      return response['Command']['CommandId']
-                  else:
-                      logger.error(\"Command could not be sent: %s\", response)
-                      return None
-              except Exception, e:
-                  logger.error(\"Command could not be sent: %s\", str(e))
-                  return None
-
-          def check_command(command_id, instance_id):
-              timewait = 1
-              while True:
-                  response_iterator = ssm_client.list_command_invocations(
-                      CommandId = command_id,
-                      InstanceId = instance_id,
-                      Details=False
-                      )
-                  if check_response(response_iterator):
-                      if response_iterator['CommandInvocations']:
-                        response_iterator_status = response_iterator['CommandInvocations'][0]['Status']
-                        if response_iterator_status != 'Pending':
-                            if response_iterator_status == 'InProgress' or response_iterator_status == 'Success':
-                                logging.info( \"Status: %s\", response_iterator_status)
-                                return True
-                            else:
-                                logging.error(\"ERROR: status: %s\", response_iterator)
-                                return False
-                  time.sleep(timewait)
-                  timewait += timewait
-
-          def abandon_lifecycle(life_cycle_hook, auto_scaling_group, instance_id):
-              asg_client = boto3.client('autoscaling')
-              try:
-                  response = asg_client.complete_lifecycle_action(
-                      LifecycleHookName=life_cycle_hook,
-                      AutoScalingGroupName=auto_scaling_group,
-                      LifecycleActionResult='ABANDON',
-                      InstanceId=instance_id
-                      )
-                  if check_response(response):
-                      logger.info(\"Lifecycle hook abandoned correctly: %s\", response)
-                  else:
-                      logger.error(\"Lifecycle hook could not be abandoned: %s\", response)
-              except Exception, e:
-                  logger.error(\"Lifecycle hook abandon could not be executed: %s\", str(e))
-                  return None
-
-          def lambda_handler(event, context):
-              try:
-                  logger.info(json.dumps(event))
-                  message = event['detail']
-                  if LIFECYCLE_KEY in message and ASG_KEY in message:
-                      life_cycle_hook = message[LIFECYCLE_KEY]
-                      auto_scaling_group = message[ASG_KEY]
-                      instance_id = message[EC2_KEY]
-                      if check_document():
-                          command_id = send_command(instance_id)
-                          if command_id != None:
-                              if check_command(command_id, instance_id):
-                                  logging.info(\"Lambda executed correctly\")
-                              else:
-                                  abandon_lifecycle(life_cycle_hook, auto_scaling_group, instance_id)
-                          else:
-                              abandon_lifecycle(life_cycle_hook, auto_scaling_group, instance_id)
-                      else:
-                          abandon_lifecycle(life_cycle_hook, auto_scaling_group, instance_id)
-                  else:
-                      logging.error(\"No valid JSON message: %s\", parsed_message)
-              except Exception, e:
-                  logging.error(\"Error: %s\", str(e))"
+          "ZipFile": { "Fn::Join" : ["", [
+          "import boto3\n",
+          "import json\n",
+          "import logging\n",
+          "import time\n",
+          "import os\n",
+          "\n",
+          "logger = logging.getLogger()\n",
+          "logger.setLevel(logging.DEBUG)\n",
+          "ssm_client = boto3.client(\"ssm\")\n",
+          "\n",
+          "LIFECYCLE_KEY = \"LifecycleHookName\"\n",
+          "ASG_KEY = \"AutoScalingGroupName\"\n",
+          "EC2_KEY = \"EC2InstanceId\"\n",
+          "DOCUMENT_NAME = os.environ['DOCUMENT_NAME']\n",
+          "RESPONSE_DOCUMENT_KEY = \"DocumentIdentifiers\"\n",
+          "\n",
+          "def check_response(response_json):\n",
+          "\ttry:\n",
+          "\t\tif response_json['ResponseMetadata']['HTTPStatusCode'] == 200:\n",
+          "\t\t\treturn True\n",
+          "\t\telse:\n",
+          "\t\t\treturn False\n",
+          "\texcept KeyError:\n",
+          "\t\treturn False\n",
+          "\n",
+          "def list_document():\n",
+          "\tdocument_filter_parameters = {'key': 'Name', 'value': DOCUMENT_NAME}\n",
+          "\tresponse = ssm_client.list_documents(\n",
+          "\t\tDocumentFilterList=[ document_filter_parameters ]\n",
+          "\t)\n",
+          "\treturn response\n",
+          "\n",
+          "def check_document():\n",
+          "\ttry:\n",
+          "\t\tresponse = list_document()\n",
+          "\t\tif check_response(response):\n",
+          "\t\t\tlogger.info(\"Documents list: %s\", response)\n",
+          "\t\t\tif response[RESPONSE_DOCUMENT_KEY]:\n",
+          "\t\t\t\tlogger.info(\"Documents exists: %s\", response)\n",
+          "\t\t\t\treturn True\n",
+          "\t\t\telse:\n",
+          "\t\t\t\treturn False\n",
+          "\t\telse:\n",
+          "\t\t\tlogger.error(\"Documents' list error: %s\", response)\n",
+          "\t\t\treturn False\n",
+          "\texcept Exception, e:\n",
+          "\t\tlogger.error(\"Document error: %s\", str(e))\n",
+          "\t\treturn None\n",
+          "\n",
+          "def send_command(instance_id):\n",
+          "\twhile True:\n",
+          "\t\ttimewait = 1\n",
+          "\t\tresponse = list_document()\n",
+          "\t\tif any(response[RESPONSE_DOCUMENT_KEY]):\n",
+          "\t\t\tbreak\n",
+          "\t\ttime.sleep(timewait)\n",
+          "\t\ttimewait += timewait\n",
+          "\ttry:\n",
+          "\t\tresponse = ssm_client.send_command(\n",
+          "\t\t\tInstanceIds = [ instance_id ],\n",
+          "\t\t\tDocumentName = DOCUMENT_NAME,\n",
+          "\t\t\tTimeoutSeconds = 120\n",
+          "\t\t\t)\n",
+          "\t\tif check_response(response):\n",
+          "\t\t\tlogger.info(\"Command sent: %s\", response)\n",
+          "\t\t\treturn response['Command']['CommandId']\n",
+          "\t\telse:\n",
+          "\t\t\tlogger.error(\"Command could not be sent: %s\", response)\n",
+          "\t\t\treturn None\n",
+          "\texcept Exception, e:\n",
+          "\t\tlogger.error(\"Command could not be sent: %s\", str(e))\n",
+          "\t\treturn None\n",
+          "\n",
+          "def check_command(command_id, instance_id):\n",
+          "\ttimewait = 1\n",
+          "\twhile True:\n",
+          "\t\tresponse_iterator = ssm_client.list_command_invocations(\n",
+          "\t\t\tCommandId = command_id,\n",
+          "\t\t\tInstanceId = instance_id,\n",
+          "\t\t\tDetails=False\n",
+          "\t\t\t)\n",
+          "\t\tif check_response(response_iterator):\n",
+          "\t\t\tif response_iterator['CommandInvocations']:\n",
+          "\t\t\t  response_iterator_status = response_iterator['CommandInvocations'][0]['Status']\n",
+          "\t\t\t  if response_iterator_status != 'Pending':\n",
+          "\t\t\t\t  if response_iterator_status == 'InProgress' or response_iterator_status == 'Success':\n",
+          "\t\t\t\t\t  logging.info( \"Status: %s\", response_iterator_status)\n",
+          "\t\t\t\t\t  return True\n",
+          "\t\t\t\t  else:\n",
+          "\t\t\t\t\t  logging.error(\"ERROR: status: %s\", response_iterator)\n",
+          "\t\t\t\t\t  return False\n",
+          "\t\ttime.sleep(timewait)\n",
+          "\t\ttimewait += timewait\n",
+          "\n",
+          "def abandon_lifecycle(life_cycle_hook, auto_scaling_group, instance_id):\n",
+          "\tasg_client = boto3.client('autoscaling')\n",
+          "\ttry:\n",
+          "\t\tresponse = asg_client.complete_lifecycle_action(\n",
+          "\t\t\tLifecycleHookName=life_cycle_hook,\n",
+          "\t\t\tAutoScalingGroupName=auto_scaling_group,\n",
+          "\t\t\tLifecycleActionResult='ABANDON',\n",
+          "\t\t\tInstanceId=instance_id\n",
+          "\t\t\t)\n",
+          "\t\tif check_response(response):\n",
+          "\t\t\tlogger.info(\"Lifecycle hook abandoned correctly: %s\", response)\n",
+          "\t\telse:\n",
+          "\t\t\tlogger.error(\"Lifecycle hook could not be abandoned: %s\", response)\n",
+          "\texcept Exception, e:\n",
+          "\t\tlogger.error(\"Lifecycle hook abandon could not be executed: %s\", str(e))\n",
+          "\t\treturn None\n",
+          "\n",
+          "def lambda_handler(event, context):\n",
+          "\ttry:\n",
+          "\t\tlogger.info(json.dumps(event))\n",
+          "\t\tmessage = event['detail']\n",
+          "\t\tif LIFECYCLE_KEY in message and ASG_KEY in message:\n",
+          "\t\t\tlife_cycle_hook = message[LIFECYCLE_KEY]\n",
+          "\t\t\tauto_scaling_group = message[ASG_KEY]\n",
+          "\t\t\tinstance_id = message[EC2_KEY]\n",
+          "\t\t\tif check_document():\n",
+          "\t\t\t\tcommand_id = send_command(instance_id)\n",
+          "\t\t\t\tif command_id != None:\n",
+          "\t\t\t\t\tif check_command(command_id, instance_id):\n",
+          "\t\t\t\t\t\tlogging.info(\"Lambda executed correctly\")\n",
+          "\t\t\t\t\telse:\n",
+          "\t\t\t\t\t\tabandon_lifecycle(life_cycle_hook, auto_scaling_group, instance_id)\n",
+          "\t\t\t\telse:\n",
+          "\t\t\t\t\tabandon_lifecycle(life_cycle_hook, auto_scaling_group, instance_id)\n",
+          "\t\t\telse:\n",
+          "\t\t\t\tabandon_lifecycle(life_cycle_hook, auto_scaling_group, instance_id)\n",
+          "\t\telse:\n",
+          "\t\t\tlogging.error(\"No valid JSON message: %s\", parsed_message)\n",
+          "\texcept Exception, e:\n",
+          "\t\tlogging.error(\"Error: %s\", str(e))"]]}
         },
         "Handler" : "index.lambda_handler",
         "Role" : { "Fn::GetAtt" : [ "LambdaRole", "Arn" ] },
