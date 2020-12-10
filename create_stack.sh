@@ -6,7 +6,7 @@ REGION=eu-west-1
 VPC=$(aws ec2 describe-vpcs --region ${REGION} --filters Name=isDefault,Values=true --query 'Vpcs[*].VpcId' --output text)
 SUBNETS=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=${VPC} --query 'Subnets[*].SubnetId' | tr "[]" " " | sed 's/\"//g')
 INSTANCE_TYPE=t2.micro
-KEYNAME=ssh-ec2
+KEYNAME=my-key-pair
 SSHLOCATION=0.0.0.0/0
 TCPUDPLOCATION=0.0.0.0/0
 PRIVATEACCESSIP=0.0.0.0/0
