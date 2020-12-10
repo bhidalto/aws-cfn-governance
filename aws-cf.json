@@ -293,9 +293,9 @@
       "Properties": {
         "VPCZoneIdentifier" : { "Ref" : "Subnets" },
         "LaunchConfigurationName": { "Ref": "LaunchConfig" },
-        "MinSize": "4",
-        "MaxSize": "6",
-        "DesiredCapacity" : "4",
+        "MinSize": "2",
+        "MaxSize": "10",
+        "DesiredCapacity" : "2",
         "MetricsCollection": [{"Granularity":"1Minute"}],
         "TargetGroupARNs": [ { "Ref": "ALBTargetGroup" } ]
       }
