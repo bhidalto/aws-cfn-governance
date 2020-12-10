@@ -49,17 +49,36 @@ Upon successfully creating the CloudFormation stack, the following outputs will 
 | --- | --- |
 | URL | Load Balancer URL from which the application is publicly accesible. |
 
-## Usage
 
-In order to successfully deploy the stack, the following command can be used:
+
+## Outcomes
+
+- All the necessary files needed to deploy the application using one command:
+
+The stack can be deployed using the following AWS CLI command:
 
 ```
 aws cloudformation create-stack --stack-name elb-ec2 --template-body file://aws-cf.json --capabilities CAPABILITY_IAM
 ```
+All the necessary files are located in the repository so these can be used directly upon deployment. A description for each of them can be seen in the following table:
 
-## Outcomes
+| File | Description |
+| --- | --- |
+| aws-cf.json | Contains the CloudFormation template that is used to define all the resources to be deployed. |
+| parameters.json | All the needed parameters for the `create-stack` command are passed by making use of this JSON file. |
+| lambda_function.py | Code which will be executed by the Lambda function. Although it's not used directly by the template, it is included in the repository for better readability. |
 
-## Improvements
+- Ability to deploy a different version of the application with only changing a deployment parameter:
+
+- Servers must be configured and provisioned at their first boot:
+
+### Bonus Tracks
+
+#### Memory Usage metric
+
+A custom CloudWatch metric has been included on the AutoScaling EC2 instances which serve the application. The CloudWatch agent is installed and started upon instance creation and afterwards the metrics `mem_used_percent` and `swap_used_percent` which are visible under the CloudWatch metrics dashboard, as a custom namespace named `CWAgent`. The metrics to be exported by the agent are defined in the `amazon-cloudwatch-agent.json` file defined in the `AWS::AutoScaling::LaunchConfiguration` resource, and if in the future further [metrics](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Agent-Configuration-File-Details.html#CloudWatch-Agent-Linux-section) should be added or even custom [logs](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Agent-Configuration-File-Details.html#CloudWatch-Agent-Configuration-File-Logssection), these can be appended there to update the Stack afterwards.
+
+#### Cost/Performance Improvements
 
 In order to improve the architecture from a cost and performance point of view, the following points are valuable and worth exploring as these will impact the whole architecture either in cost or performance.
 

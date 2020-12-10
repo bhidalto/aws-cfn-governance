@@ -505,6 +505,22 @@
           }]
       }
     },
+    "ScalingPolicy" : {
+      "Type" : "AWS::AutoScaling::ScalingPolicy",
+      "Properties" : {
+          "AdjustmentType" : "PercentChangeInCapacity",
+          "AutoScalingGroupName" : { "Ref" : "WebServerGroup"},
+          "PolicyType" : "TargetTrackingScaling",
+          "TargetTrackingConfiguration" : 
+          {
+            "DisableScaleIn" : false,
+            "PredefinedMetricSpecification" : {
+              "PredefinedMetricType" : "ASGAverageCPUUtilization"
+            },
+            "TargetValue" : 50.0
+          }
+        }
+    },
     "LaunchConfig": {
       "Type": "AWS::AutoScaling::LaunchConfiguration",
       "Metadata" : {
