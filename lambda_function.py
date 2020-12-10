@@ -2,6 +2,7 @@ import boto3
 import json
 import logging
 import time
+import os
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -10,7 +11,7 @@ ssm_client = boto3.client("ssm")
 LIFECYCLE_KEY = "LifecycleHookName"
 ASG_KEY = "AutoScalingGroupName"
 EC2_KEY = "EC2InstanceId"
-DOCUMENT_NAME = "ASGLogBackup"
+DOCUMENT_NAME = os.environ['DOCUMENT_NAME']
 RESPONSE_DOCUMENT_KEY = "DocumentIdentifiers"
 
 def check_response(response_json):
@@ -45,7 +46,7 @@ def check_document():
             return False
     except Exception, e:
         logger.error("Document error: %s", str(e))
-        return None   
+        return None
 
 def send_command(instance_id):
     # Until the document is not ready, waits in accordance to a backoff mechanism.
@@ -58,12 +59,12 @@ def send_command(instance_id):
         timewait += timewait
     try:
         response = ssm_client.send_command(
-            InstanceIds = [ instance_id ], 
-            DocumentName = DOCUMENT_NAME, 
+            InstanceIds = [ instance_id ],
+            DocumentName = DOCUMENT_NAME,
             TimeoutSeconds = 120
             )
         if check_response(response):
-            logger.info("Command sent: %s", response)       
+            logger.info("Command sent: %s", response)
             return response['Command']['CommandId']
         else:
             logger.error("Command could not be sent: %s", response)
@@ -76,8 +77,8 @@ def check_command(command_id, instance_id):
     timewait = 1
     while True:
         response_iterator = ssm_client.list_command_invocations(
-            CommandId = command_id, 
-            InstanceId = instance_id, 
+            CommandId = command_id,
+            InstanceId = instance_id,
             Details=False
             )
         if check_response(response_iterator):
@@ -108,7 +109,7 @@ def abandon_lifecycle(life_cycle_hook, auto_scaling_group, instance_id):
             logger.error("Lifecycle hook could not be abandoned: %s", response)
     except Exception, e:
         logger.error("Lifecycle hook abandon could not be executed: %s", str(e))
-        return None    
+        return None
 
 def lambda_handler(event, context):
     try:
