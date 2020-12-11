@@ -6,7 +6,7 @@ REGION=eu-west-1
 VPC=$(aws ec2 describe-vpcs --region ${REGION} --filters Name=isDefault,Values=true --query 'Vpcs[*].VpcId' --output text)
 SUBNETS=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=${VPC} --query 'Subnets[*].SubnetId' | tr "[]" " " | sed 's/\"//g')
 INSTANCE_TYPE=t2.micro
-KEYNAME=my-key-pair
+KEYNAME=my-key-pair-test
 SSHLOCATION=0.0.0.0/0
 TCPUDPLOCATION=0.0.0.0/0
 PRIVATEACCESSIP=0.0.0.0/0
@@ -42,9 +42,23 @@ PARAMS_TEMPLATE='[
             "ParameterValue": "%s"
         }
     ]'
-
+echo "Creating JSON that contains the needed parameters...."
 JSON_STRING=$(printf "$PARAMS_TEMPLATE" "$VPC" "$SUBNETS" "$INSTANCE_TYPE" "$KEYNAME" "$SSHLOCATION" "$TCPUDPLOCATION" "$PRIVATEACCESSIP")
-
+echo "JSON correctly created."
+echo "Copying JSON data to ${PARAMETERS_FILE}"
 echo $JSON_STRING > $PARAMETERS_FILE
-
+echo "Done. Successfuly created ${PARAMETERS_FILE}"
+echo "Attempting to create new EC2 key-pair with the provided keyname: ${KEYNAME}"
+aws ec2 create-key-pair --key-name $KEYNAME
+if [ $? -eq 0 ]; then
+    echo "Successfully created new AWS EC2 key-pair with keyname: ${KEYNAME}"
+else
+    echo "The keyname already exists, will be used as is in the stack."
+fi
+echo "Proceeding to create the stack ${STACK_NAME} using ${TEMPLATE_FILE} as template."
 aws cloudformation create-stack --stack-name $STACK_NAME --template-body $TEMPLATE_FILE --parameters file://${PARAMETERS_FILE} --capabilities CAPABILITY_IAM
+if [ $? -eq 0 ]; then
+    echo "Success! Stack ${STACK_NAME} has been created."
+else
+    echo "Something went wrong, the create stack operation failed."
+fi
