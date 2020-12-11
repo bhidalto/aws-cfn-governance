@@ -52,8 +52,11 @@ echo "Attempting to create new EC2 key-pair with the provided keyname: ${KEYNAME
 aws ec2 create-key-pair --key-name $KEYNAME
 if [ $? -eq 0 ]; then
     echo "Successfully created new AWS EC2 key-pair with keyname: ${KEYNAME}"
+elif [ $? -eq 254 ]; then
+    echo "The keypair already exists, will be using it in the stack."
 else
-    echo "The keyname already exists, will be used as is in the stack."
+    echo "There was an error attempting to create the key-pair, stopping the script."
+    exit
 fi
 echo "Proceeding to create the stack ${STACK_NAME} using ${TEMPLATE_FILE} as template."
 aws cloudformation create-stack --stack-name $STACK_NAME --template-body $TEMPLATE_FILE --parameters file://${PARAMETERS_FILE} --capabilities CAPABILITY_IAM

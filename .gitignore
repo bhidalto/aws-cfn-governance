@@ -1,3 +1,4 @@
 *.pem
 *.txt
 test.json
+parameters.json
