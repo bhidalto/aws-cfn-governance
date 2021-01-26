@@ -1,6 +1,6 @@
 #!/bin/sh
 
-STACK_NAME=adevinta-aws-test
+STACK_NAME=aws-cfn-stack
 TEMPLATE_FILE=file://aws-cf.json
 REGION=eu-west-1
 VPC=$(aws ec2 describe-vpcs --region ${REGION} --filters Name=isDefault,Values=true --query 'Vpcs[*].VpcId' --output text)
